@@ -1,9 +1,6 @@
 #include "VPacker.h"
 
 //TODO write to temp file and then copy to output path
-//TODO write to disk less often; buffer more in memory
-//TODO only have one string for path; allocate at beginning and concat/chop off directories as necessary
-//TODO strip slashes off end and convert wrong slashes if necessary
 
 int main(int argc, char *argv[]) {
 	if (argc != 3) {
@@ -14,8 +11,8 @@ int main(int argc, char *argv[]) {
 	HANDLE writeHandle;
 	LPCSTR writeFilePath = (LPCSTR)_malloca(strnlen(argv[1], MAX_PATH) + 1);
 	writeFilePath = argv[1];
-	LPCSTR readBasePath = (LPCSTR)_malloca(strnlen(argv[2], MAX_PATH) + 1);
-	readBasePath = argv[2];
+	char *readBasePath = (char*)malloc(MAX_PATH + 1);
+	strcpy_s(readBasePath, MAX_PATH, argv[2]);
 
 	LPCSTR folderName = strrchr(readBasePath, '\\') + 1;
 	if (_stricmp(folderName, "data")) {
@@ -25,7 +22,7 @@ int main(int argc, char *argv[]) {
 
 	LPCSTR fileExtension = strrchr(writeFilePath, '.') + 1;
 	if (_stricmp(fileExtension, "vp") && _stricmp(fileExtension, "VP")) {
-		printf("The output file should be a .vp file");
+		printf("The output file must be a .vp file");
 		return USER_ERROR;
 	}
 
@@ -51,7 +48,7 @@ int main(int argc, char *argv[]) {
 		FILETIME zero;
 		zero.dwHighDateTime = 0;
 		zero.dwLowDateTime = 0;
-		initializeDirentry(&(direntryArr[counter++]), 0, folderName, zero);
+		initializeDirentry(&(direntryArr[counter++]), 0, folderName, &zero);
 		rv = writeVP(writeHandle, &readBasePath, 0);
 
 		writeHeader(writeHandle, offset, counter);
@@ -70,6 +67,8 @@ int main(int argc, char *argv[]) {
 	CloseHandle(writeHandle);
 	free(direntryArr);
 	direntryArr = NULL;
+	free(readBasePath);
+	readBasePath = NULL;
 	if (!rv) {
 		printf("Success");
 	}
@@ -82,12 +81,15 @@ int main(int argc, char *argv[]) {
 	else if (rv == WRITEFILE_ERROR) {
 		printf("Error writing the vp file");
 	}
+	else if (rv == RECURSION_DEPTH_EXCEEDED) {
+		printf("Recursion depth exceeded; perhaps you have too many nested folders");
+	}
 	return rv;
 }
 
-int writeVP(HANDLE writeHandle, LPCSTR *readBasePath, int depth) {
+int writeVP(HANDLE writeHandle, char* *readBasePath, int depth) {
 	if (depth > MAX_RECURSION_DEPTH) {
-		return USER_ERROR;
+		return RECURSION_DEPTH_EXCEEDED;
 	}
 
 	int rv = 0;
@@ -111,15 +113,13 @@ int writeVP(HANDLE writeHandle, LPCSTR *readBasePath, int depth) {
 			//current directory because it's directry has already been written
 			//and parent for obvious reasons
 			if (_stricmp(fileInfo.cFileName, ".") && _stricmp(fileInfo.cFileName, "..")) {
-				initializeDirentry(&(direntryArr[counter++]), 0, fileInfo.cFileName, zero);
-				//char subdirPath[MAX_PATH];
-				char* subdirPath = (char*)malloc(MAX_PATH);
-				strcpy_s(subdirPath, MAX_PATH, *readBasePath);
-				strcat_s(subdirPath, MAX_PATH, "\\");
-				strcat_s(subdirPath, MAX_PATH, fileInfo.cFileName);
-				writeVP(writeHandle, &subdirPath, depth + 1);
-				free(subdirPath);
-				subdirPath = NULL;
+				initializeDirentry(&(direntryArr[counter++]), 0, fileInfo.cFileName, &zero);
+				strcat_s(*readBasePath, MAX_PATH, "\\");
+				strcat_s(*readBasePath, MAX_PATH, fileInfo.cFileName);
+				writeVP(writeHandle, readBasePath, depth + 1);
+
+				char *c = strrchr(*readBasePath, '\\');
+				*c = 0;
 			}
 			continue;
 		}
@@ -137,7 +137,7 @@ int writeVP(HANDLE writeHandle, LPCSTR *readBasePath, int depth) {
 		//Potential for overflow but the VP spec specifies an int
 		int fileSize = (fileInfo.nFileSizeHigh * (MAXDWORD + 1)) + fileInfo.nFileSizeLow;
 
-		initializeDirentry(&(direntryArr[counter++]), fileSize, fileInfo.cFileName, fileInfo.ftLastWriteTime);
+		initializeDirentry(&(direntryArr[counter++]), fileSize, fileInfo.cFileName, &(fileInfo.ftLastWriteTime));
 
 		offset += fileSize;
 
@@ -159,7 +159,7 @@ int writeVP(HANDLE writeHandle, LPCSTR *readBasePath, int depth) {
 		CloseHandle(readHandle);
 	} while (FindNextFileA(fileSearchHandle, &fileInfo));
 
-	initializeDirentry(&(direntryArr[counter]), 0, "..", zero);
+	initializeDirentry(&(direntryArr[counter]), 0, "..", &zero);
 	counter++;
 
 cleanup:
@@ -211,15 +211,15 @@ BOOL writeDirentries(HANDLE file, int offset, int numEntries) {
 }
 
 //This function isn't given the offset because when it's called, we don't know the offset yet
-void initializeDirentry(direntry *de, int size, LPCSTR name, FILETIME timestamp) {
+void initializeDirentry(direntry *de, int size, LPCSTR name, FILETIME *timestamp) {
 	de->size = size;
 	strcpy_s(de->filename, 32, name);
 	de->timestamp = convertToUnixTime(timestamp);
 }
 
 //https://support.microsoft.com/en-us/help/167296/how-to-convert-a-unix-time-t-to-a-win32-filetime-or-systemtime
-int convertToUnixTime(FILETIME timestamp) {
-	if (timestamp.dwHighDateTime == 0 && timestamp.dwLowDateTime == 0) {
+int convertToUnixTime(FILETIME *timestamp) {
+	if (timestamp->dwHighDateTime == 0 && timestamp->dwLowDateTime == 0) {
 		return 0;
 	}
 
@@ -228,11 +228,9 @@ int convertToUnixTime(FILETIME timestamp) {
 	ULARGE_INTEGER givenTime;
 	unixZero.LowPart = (DWORD)unixZeroVal;
 	unixZero.HighPart = unixZeroVal >> 32;
-	givenTime.LowPart = timestamp.dwLowDateTime;
-	givenTime.HighPart = timestamp.dwHighDateTime;
+	givenTime.LowPart = timestamp->dwLowDateTime;
+	givenTime.HighPart = timestamp->dwHighDateTime;
 	givenTime.QuadPart -= unixZero.QuadPart;
-	//I think this should always be less than a signed 32-bit int
-	//at least until 2038...
 	givenTime.QuadPart /= 10000000;
 	return (int)givenTime.QuadPart;
 }
