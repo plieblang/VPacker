@@ -1,12 +1,12 @@
 #include "VPacker.h"
 
-//TODO write to temp file and then copy to output path
-
 int main(int argc, char *argv[]) {
 	if (argc != 3) {
 		printf("Usage: %s <[Path\\To\\]Output.vp> <[Path\\To\\]InputFolder>", argv[0]);
 		return USER_ERROR;
 	}
+
+	buf = (BYTE*)malloc(BUFFERSIZE);
 
 	HANDLE writeHandle;
 	LPCSTR writeFilePath = (LPCSTR)_malloca(strnlen(argv[1], MAX_PATH) + 1);
@@ -49,7 +49,8 @@ int main(int argc, char *argv[]) {
 		zero.dwHighDateTime = 0;
 		zero.dwLowDateTime = 0;
 		initializeDirentry(&(direntryArr[counter++]), 0, folderName, &zero);
-		rv = writeVP(writeHandle, &readBasePath, 0);
+		DWORD amtBuffered = 0;
+		rv = writeVP(writeHandle, &readBasePath, &amtBuffered, 0);
 
 		writeHeader(writeHandle, offset, counter);
 
@@ -69,25 +70,30 @@ int main(int argc, char *argv[]) {
 	direntryArr = NULL;
 	free(readBasePath);
 	readBasePath = NULL;
-	if (!rv) {
+
+	//the fallthrough is intentional
+	switch (rv)
+	{
+	case SUCCESS:
 		printf("Success");
-	}
-	else if (rv == CREATEFILE_ERROR) {
+		break;
+	case CREATEFILE_ERROR:
 		printf("Error creating a necessary file");
-	}
-	else if (rv == READFILE_ERROR) {
-		printf("Error reading a file");
-	}
-	else if (rv == WRITEFILE_ERROR) {
+	case READFILE_ERROR:
 		printf("Error writing the vp file");
-	}
-	else if (rv == RECURSION_DEPTH_EXCEEDED) {
+	case WRITEFILE_ERROR:
+		printf("Error writing the vp file");
+	case RECURSION_DEPTH_EXCEEDED:
 		printf("Recursion depth exceeded; perhaps you have too many nested folders");
+	default:
+		DeleteFileA(writeFilePath);
+		break;
 	}
+
 	return rv;
 }
 
-int writeVP(HANDLE writeHandle, char* *readBasePath, int depth) {
+int writeVP(HANDLE writeHandle, char* *readBasePath, DWORD *amtBuffered, int depth) {
 	if (depth > MAX_RECURSION_DEPTH) {
 		return RECURSION_DEPTH_EXCEEDED;
 	}
@@ -116,7 +122,9 @@ int writeVP(HANDLE writeHandle, char* *readBasePath, int depth) {
 				initializeDirentry(&(direntryArr[counter++]), 0, fileInfo.cFileName, &zero);
 				strcat_s(*readBasePath, MAX_PATH, "\\");
 				strcat_s(*readBasePath, MAX_PATH, fileInfo.cFileName);
-				writeVP(writeHandle, readBasePath, depth + 1);
+				if ((rv = writeVP(writeHandle, readBasePath, amtBuffered, depth + 1))) {
+					goto cleanup;
+				}
 
 				char *c = strrchr(*readBasePath, '\\');
 				*c = 0;
@@ -142,14 +150,21 @@ int writeVP(HANDLE writeHandle, char* *readBasePath, int depth) {
 		offset += fileSize;
 
 		do {
-			if (!ReadFile(readHandle, &buf, BUFFERSIZE, &numRead, NULL)) {
+			if (!ReadFile(readHandle, buf + *amtBuffered, BUFFERSIZE - *amtBuffered, &numRead, NULL)) {
 				rv = READFILE_ERROR;
 				goto cleanup;
 			}
-			if (!WriteFile(writeHandle, buf, numRead, &numWritten, NULL)) {
-				rv = WRITEFILE_ERROR;
-				goto cleanup;
+
+			*amtBuffered += numRead;
+
+			if(*amtBuffered >= BUFFERSIZE) {
+				if (!WriteFile(writeHandle, buf, *amtBuffered, &numWritten, NULL)) {
+					rv = WRITEFILE_ERROR;
+					goto cleanup;
+				}
+				*amtBuffered = 0;
 			}
+			
 		} while (numRead);
 
 		if (counter > direntryArrSlots) {
@@ -158,6 +173,15 @@ int writeVP(HANDLE writeHandle, char* *readBasePath, int depth) {
 		}
 		CloseHandle(readHandle);
 	} while (FindNextFileA(fileSearchHandle, &fileInfo));
+
+	//write the remaining buffer when we're all done
+	if (!depth && *amtBuffered) {
+		if (!WriteFile(writeHandle, buf, *amtBuffered, &numWritten, NULL)) {
+			rv = WRITEFILE_ERROR;
+			goto cleanup;
+		}
+		*amtBuffered = 0;
+	}
 
 	initializeDirentry(&(direntryArr[counter]), 0, "..", &zero);
 	counter++;
