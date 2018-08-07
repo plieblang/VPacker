@@ -1,5 +1,7 @@
 /x64
 /Debug
+/Release
 /VPacker/Debug
+/VPacker/Release
 /VPacker/x64
 /.vs

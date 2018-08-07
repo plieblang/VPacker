@@ -30,5 +30,5 @@ direntry *direntryArr;
 size_t direntryArrSlots;
 //FIXME verify type
 BYTE *buf;
-int counter, offset;
+DWORD counter, offset;
 WIN32_FIND_DATAA fileInfo;

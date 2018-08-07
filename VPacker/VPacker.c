@@ -56,7 +56,7 @@ int main(int argc, char *argv[]) {
 
 		int tempOffset = sizeof(header);
 		//fill in the offsets now that we can calculate them
-		for (int i = 0; i < counter; i++) {
+		for (DWORD i = 0; i < counter; i++) {
 			direntryArr[i].offset = tempOffset;
 			tempOffset += direntryArr[i].size;
 		}
