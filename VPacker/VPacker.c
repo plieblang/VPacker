@@ -14,10 +14,24 @@ int main(int argc, char *argv[]) {
 	char *readBasePath = (char*)malloc(MAX_PATH + 1);
 	strcpy_s(readBasePath, MAX_PATH, argv[2]);
 
-	LPCSTR folderName = strrchr(readBasePath, '\\') + 1;
-	if (folderName == NULL) {
-		folderName = readBasePath;
+	//strip the leading ".\" that PowerShell might use
+	if (readBasePath[0] == '.' && readBasePath[1] == '\\') {
+		readBasePath += 2;
 	}
+
+	//strip trailing slashes
+	size_t len = strnlen_s(readBasePath, MAX_PATH);
+	if (readBasePath[len - 1] == '\\' || readBasePath[len - 1] == '/') {
+		readBasePath[len - 1] = 0;
+	}
+
+	LPCSTR folderName = strrchr(readBasePath, '\\');
+	if (folderName == NULL) {
+		printf("Relative paths are not currently supported");
+		return USER_ERROR;
+	}
+
+	folderName += 1;
 	if (_stricmp(folderName, "data")) {
 		printf("The root folder must be named \"data\"");
 		return USER_ERROR;
