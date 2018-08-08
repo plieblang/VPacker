@@ -2,7 +2,7 @@
 
 int main(int argc, char *argv[]) {
 	if (argc != 3) {
-		printf("Usage: %s <[Path\\To\\]Output.vp> <[Path\\To\\]InputFolder>", argv[0]);
+		printf("Usage: %s <Path\\To\\Output.vp> <Path\\To\\InputFolder>", argv[0]);
 		return USER_ERROR;
 	}
 
@@ -15,6 +15,9 @@ int main(int argc, char *argv[]) {
 	strcpy_s(readBasePath, MAX_PATH, argv[2]);
 
 	LPCSTR folderName = strrchr(readBasePath, '\\') + 1;
+	if (folderName == NULL) {
+		folderName = readBasePath;
+	}
 	if (_stricmp(folderName, "data")) {
 		printf("The root folder must be named \"data\"");
 		return USER_ERROR;
@@ -71,7 +74,6 @@ int main(int argc, char *argv[]) {
 	free(readBasePath);
 	readBasePath = NULL;
 
-	//the fallthrough is intentional
 	switch (rv)
 	{
 	case SUCCESS:
@@ -79,12 +81,20 @@ int main(int argc, char *argv[]) {
 		break;
 	case CREATEFILE_ERROR:
 		printf("Error creating a necessary file");
+		DeleteFileA(writeFilePath);
+		break;
 	case READFILE_ERROR:
 		printf("Error writing the vp file");
+		DeleteFileA(writeFilePath);
+		break;
 	case WRITEFILE_ERROR:
 		printf("Error writing the vp file");
+		DeleteFileA(writeFilePath);
+		break;
 	case RECURSION_DEPTH_EXCEEDED:
 		printf("Recursion depth exceeded; perhaps you have too many nested folders");
+		DeleteFileA(writeFilePath);
+		break;
 	default:
 		DeleteFileA(writeFilePath);
 		break;
