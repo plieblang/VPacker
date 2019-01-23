@@ -98,7 +98,7 @@ int main(int argc, char *argv[]) {
 		DeleteFileA(writeFilePath);
 		break;
 	case READFILE_ERROR:
-		printf("Error writing the vp file");
+		printf("Error reading a file");
 		DeleteFileA(writeFilePath);
 		break;
 	case WRITEFILE_ERROR:
